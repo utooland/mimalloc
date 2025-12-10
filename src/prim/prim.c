@@ -21,6 +21,9 @@ terms of the MIT license. A copy of the license can be found in the file
 #elif defined(__EMSCRIPTEN__)
 #include "emscripten/prim.c" // emmalloc_*, + pthread support
 
+#elif defined(__wasm__)
+#include "wasi/prim.c"     // memory-grow (Wasm)
+
 #else
 #include "unix/prim.c"     // mmap() (Linux, macOSX, BSD, Illumnos, Haiku, DragonFly, etc.)
 
@@ -28,7 +31,7 @@ terms of the MIT license. A copy of the license can be found in the file
 
 // Generic process initialization
 #ifndef MI_PRIM_HAS_PROCESS_ATTACH
-#if defined(__GNUC__) || defined(__clang__)
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(__wasm__)
   // gcc,clang: use the constructor/destructor attribute
   // which for both seem to run before regular constructors/destructors
   #if defined(__clang__)

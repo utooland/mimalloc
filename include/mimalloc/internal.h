@@ -17,6 +17,13 @@ terms of the MIT license. A copy of the license can be found in the file
 #include "track.h"
 #include "bits.h"
 
+#if defined(__wasm__)
+#include <string.h>
+// If string.h doesn't declare them (e.g. freestanding), declare them here
+void* memset(void* dest, int ch, size_t count);
+void* memcpy(void* dest, const void* src, size_t count);
+#endif
+
 
 // --------------------------------------------------------------------------
 // Compiler defines

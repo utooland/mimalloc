@@ -460,7 +460,9 @@ static void* mi_arena_os_alloc_aligned(
 {
   // if we cannot use OS allocation, return NULL
   if (mi_option_is_enabled(mi_option_disallow_os_alloc) || req_arena_id != _mi_arena_id_none()) {
+    #ifndef __wasm__
     errno = ENOMEM;
+    #endif
     return NULL;
   }
 

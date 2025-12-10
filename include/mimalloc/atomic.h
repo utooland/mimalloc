@@ -14,7 +14,7 @@ terms of the MIT license. A copy of the license can be found in the file
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#elif !defined(__wasi__) && (!defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__))
+#elif !defined(__wasi__) && (!defined(__wasm__) || (defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__)))
 #define  MI_USE_PTHREADS
 #include <pthread.h>
 #endif
@@ -421,6 +421,10 @@ static inline void mi_atomic_yield(void) {
 #include <sched.h>
 static inline void mi_atomic_yield(void) {
   sched_yield();
+}
+#elif defined(__wasm__)
+static inline void mi_atomic_yield(void) {
+  // nothing
 }
 #else
 #include <unistd.h>

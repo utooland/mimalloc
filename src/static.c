@@ -22,7 +22,9 @@ terms of the MIT license. A copy of the license can be found in the file
 // functions (on Unix's).
 #include "alloc.c"          // includes alloc-override.c and free.c
 #include "alloc-aligned.c"
+#if !defined(__wasm__)
 #include "alloc-posix.c"
+#endif
 #include "arena.c"
 #include "arena-meta.c"
 #include "bitmap.c"

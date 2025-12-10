@@ -11,6 +11,19 @@ terms of the MIT license. A copy of the license can be found in the file
 
 #include <stdio.h>      // stdin/stdout
 #include <stdlib.h>     // abort
+#include <string.h>     // strstr
+
+#if defined(__wasm__)
+#if !defined(stdout)
+#define stdout NULL
+#endif
+#if !defined(stderr)
+#define stderr NULL
+#endif
+void abort(void);
+long strtol(const char* str, char** endptr, int base);
+char* strstr(const char* haystack, const char* needle);
+#endif
 
 static long mi_max_error_count   = 16; // stop outputting errors after this (use < 0 for no limit)
 static long mi_max_warning_count = 16; // stop outputting warnings after this (use < 0 for no limit)

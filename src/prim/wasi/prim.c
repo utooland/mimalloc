@@ -13,6 +13,11 @@ terms of the MIT license. A copy of the license can be found in the file
 
 #include <stdio.h>   // fputs
 #include <stdlib.h>  // getenv
+#include <string.h>  // memset, memcpy
+
+#if defined(__wasm__) && !defined(__wasi__)
+#define ENOSYS 38
+#endif
 
 //---------------------------------------------
 // Initialize
@@ -52,7 +57,7 @@ int _mi_prim_free(void* addr, size_t size ) {
     #endif
     return p;
   }
-#elif defined(__wasi__)
+#elif defined(__wasi__) || defined(__wasm__)
   static void* mi_memory_grow( size_t size ) {
     size_t base = (size > 0 ? __builtin_wasm_memory_grow(0,_mi_divide_up(size, _mi_os_page_size()))
                             : __builtin_wasm_memory_size(0));
@@ -89,7 +94,7 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
     {
       void* current = mi_memory_grow(0);  // get current size
       if (current != NULL) {
-        void* aligned_current = mi_align_up_ptr(current, try_alignment);  // and align from there to minimize wasted space
+        void* aligned_current = _mi_align_up_ptr(current, try_alignment);  // and align from there to minimize wasted space
         alloc_size = _mi_align_up( ((uint8_t*)aligned_current - (uint8_t*)current) + size, _mi_os_page_size());
         base = mi_memory_grow(alloc_size);
       }
@@ -98,7 +103,7 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
     pthread_mutex_unlock(&mi_heap_grow_mutex);
     #endif
     if (base != NULL) {
-      p = mi_align_up_ptr(base, try_alignment);
+      p = _mi_align_up_ptr(base, try_alignment);
       if ((uint8_t*)p + size > (uint8_t*)base + alloc_size) {
         // another thread used wasm_memory_grow/sbrk in-between and we do not have enough
         // space after alignment. Give up (and waste the space as we cannot shrink :-( )
@@ -184,9 +189,12 @@ size_t _mi_prim_numa_node_count(void) {
 // Clock
 //----------------------------------------------------------------
 
+#if !defined(__wasi__) && !defined(MI_USE_SBRK)
+mi_msecs_t _mi_prim_clock_now(void) {
+  return 0;
+}
+#elif defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
 #include <time.h>
-
-#if defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
 
 mi_msecs_t _mi_prim_clock_now(void) {
   struct timespec t;
@@ -230,7 +238,11 @@ void _mi_prim_process_info(mi_process_info_t* pinfo)
 //----------------------------------------------------------------
 
 void _mi_prim_out_stderr( const char* msg ) {
+  #if defined(__wasi__) || defined(MI_USE_SBRK)
   fputs(msg,stderr);
+  #else
+  MI_UNUSED(msg);
+  #endif
 }
 
 
@@ -239,6 +251,10 @@ void _mi_prim_out_stderr( const char* msg ) {
 //----------------------------------------------------------------
 
 bool _mi_prim_getenv(const char* name, char* result, size_t result_size) {
+  #if !defined(__wasi__) && !defined(MI_USE_SBRK)
+  MI_UNUSED(name); MI_UNUSED(result); MI_UNUSED(result_size);
+  return false;
+  #else
   // cannot call getenv() when still initializing the C runtime.
   if (_mi_preloading()) return false;
   const char* s = getenv(name);
@@ -255,6 +271,7 @@ bool _mi_prim_getenv(const char* name, char* result, size_t result_size) {
   if (s == NULL || _mi_strnlen(s,result_size) >= result_size)  return false;
   _mi_strlcpy(result, s, result_size);
   return true;
+  #endif
 }
 
 

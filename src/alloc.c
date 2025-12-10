@@ -16,6 +16,10 @@ terms of the MIT license. A copy of the license can be found in the file
 #include <string.h>      // memset, strlen (for mi_strdup)
 #include <stdlib.h>      // malloc, abort
 
+#if defined(__wasm__)
+void abort(void);
+#endif
+
 #define MI_IN_ALLOC_C
 #include "alloc-override.c"
 #include "free.c"
@@ -414,6 +418,10 @@ static size_t mi_path_max(void) {
 }
 */
 char* mi_heap_realpath(mi_heap_t* heap, const char* fname, char* resolved_name) mi_attr_noexcept {
+  #if defined(__wasm__)
+  MI_UNUSED(heap); MI_UNUSED(fname); MI_UNUSED(resolved_name);
+  return NULL;
+  #else
   if (resolved_name != NULL) {
     return realpath(fname,resolved_name);
   }
@@ -425,6 +433,7 @@ char* mi_heap_realpath(mi_heap_t* heap, const char* fname, char* resolved_name) 
     // note: with ASAN realpath is intercepted and mi_cfree may leak the returned pointer :-(
     return result;
   }
+  #endif
   /*
     const size_t n  = mi_path_max();
     char* buf = (char*)mi_malloc(n+1);
