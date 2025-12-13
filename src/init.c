@@ -187,6 +187,7 @@ mi_threadid_t _mi_thread_id(void) mi_attr_noexcept {
 mi_decl_thread mi_heap_t* _mi_heap_default = (mi_heap_t*)&_mi_heap_empty;
 
 
+
 bool _mi_process_is_initialized = false;  // set to `true` in `mi_process_init`.
 
 mi_stats_t _mi_stats_main = { MI_STAT_VERSION, MI_STATS_NULL };
@@ -595,6 +596,8 @@ void _mi_heap_set_default_direct(mi_heap_t* heap)  {
   *mi_prim_tls_pthread_heap_slot() = heap;
   #elif defined(MI_TLS_PTHREAD)
   // we use _mi_heap_default_key
+  #elif defined(MI_USE_RUST_TLS)
+  rust_mi_set_default_heap(heap);
   #else
   _mi_heap_default = heap;
   #endif

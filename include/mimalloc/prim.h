@@ -300,6 +300,12 @@ static inline mi_threadid_t __mi_prim_thread_id(void) mi_attr_noexcept {
   return (uintptr_t)NtCurrentTeb();
 }
 
+#elif defined(MI_USE_RUST_TLS)
+extern mi_threadid_t rust_mi_get_thread_id(void);
+static inline mi_threadid_t __mi_prim_thread_id(void) mi_attr_noexcept {
+  return rust_mi_get_thread_id();
+}
+
 #elif MI_USE_BUILTIN_THREAD_POINTER
 
 static inline mi_threadid_t __mi_prim_thread_id(void) mi_attr_noexcept {
@@ -406,6 +412,17 @@ static inline mi_heap_t* mi_prim_get_default_heap(void) {
   mi_heap_t* heap = *pheap;
   if mi_unlikely(heap == NULL) return (mi_heap_t*)&_mi_heap_empty;
   return heap;
+}
+
+#elif defined(MI_USE_RUST_TLS)
+extern mi_heap_t* rust_mi_get_default_heap(void);
+extern void rust_mi_set_default_heap(mi_heap_t* heap);
+// extern size_t rust_mi_get_thread_id(void); // moved to __mi_prim_thread_id
+
+static inline mi_heap_t* mi_prim_get_default_heap(void) {
+    mi_heap_t* heap = rust_mi_get_default_heap();
+    if (mi_unlikely(heap == NULL)) return (mi_heap_t*)&_mi_heap_empty;
+    return heap;
 }
 
 #elif defined(MI_TLS_PTHREAD)

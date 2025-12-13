@@ -52,12 +52,31 @@ int _mi_prim_free(void* addr, size_t size ) {
     #endif
     return p;
   }
-#elif defined(__wasi__)
+#elif defined(__wasi__) || defined(__wasm__)
   static void* mi_memory_grow( size_t size ) {
-    size_t base = (size > 0 ? __builtin_wasm_memory_grow(0,_mi_divide_up(size, _mi_os_page_size()))
+    // WebAssembly has a fixed page size of 64KiB
+    const size_t wasm_page_size = 64 * 1024;
+    
+    size_t pages = (size + wasm_page_size - 1) / wasm_page_size;
+    size_t base = (size > 0 ? __builtin_wasm_memory_grow(0, pages)
                             : __builtin_wasm_memory_size(0));
+    
+    if (base == 0) {
+        // If we got address 0, we cannot use it as mimalloc treats NULL as failure.
+        // We burn the first page(s) and try again or adjust.
+        if (size == 0) {
+             // Querying size, but heap is empty. Grow by 1 page to establish a non-zero break.
+             if (__builtin_wasm_memory_grow(0, 1) == SIZE_MAX) return NULL;
+             base = 1; 
+        } else {
+             // We allocated the first chunk (starting at 0) but can't use it. 
+             // Allocate again to get a non-zero address.
+             base = __builtin_wasm_memory_grow(0, pages);
+        }
+    }
+
     if (base == SIZE_MAX) return NULL;
-    return (void*)(base * _mi_os_page_size());
+    return (void*)(base * wasm_page_size);
   }
 #endif
 
@@ -89,7 +108,7 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
     {
       void* current = mi_memory_grow(0);  // get current size
       if (current != NULL) {
-        void* aligned_current = mi_align_up_ptr(current, try_alignment);  // and align from there to minimize wasted space
+        void* aligned_current = _mi_align_up_ptr(current, try_alignment);  // and align from there to minimize wasted space
         alloc_size = _mi_align_up( ((uint8_t*)aligned_current - (uint8_t*)current) + size, _mi_os_page_size());
         base = mi_memory_grow(alloc_size);
       }
@@ -98,7 +117,7 @@ static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
     pthread_mutex_unlock(&mi_heap_grow_mutex);
     #endif
     if (base != NULL) {
-      p = mi_align_up_ptr(base, try_alignment);
+      p = _mi_align_up_ptr(base, try_alignment);
       if ((uint8_t*)p + size > (uint8_t*)base + alloc_size) {
         // another thread used wasm_memory_grow/sbrk in-between and we do not have enough
         // space after alignment. Give up (and waste the space as we cannot shrink :-( )
@@ -184,9 +203,8 @@ size_t _mi_prim_numa_node_count(void) {
 // Clock
 //----------------------------------------------------------------
 
-#include <time.h>
-
 #if defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
+#include <time.h>
 
 mi_msecs_t _mi_prim_clock_now(void) {
   struct timespec t;
