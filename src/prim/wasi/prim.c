@@ -56,26 +56,32 @@ int _mi_prim_free(void* addr, size_t size ) {
   static void* mi_memory_grow( size_t size ) {
     // WebAssembly has a fixed page size of 64KiB
     const size_t wasm_page_size = 64 * 1024;
-    
-    size_t pages = (size + wasm_page_size - 1) / wasm_page_size;
-    size_t base = (size > 0 ? __builtin_wasm_memory_grow(0, pages)
-                            : __builtin_wasm_memory_size(0));
-    
-    if (base == 0) {
-        // If we got address 0, we cannot use it as mimalloc treats NULL as failure.
-        // We burn the first page(s) and try again or adjust.
-        if (size == 0) {
-             // Querying size, but heap is empty. Grow by 1 page to establish a non-zero break.
-             if (__builtin_wasm_memory_grow(0, 1) == SIZE_MAX) return NULL;
-             base = 1; 
-        } else {
-             // We allocated the first chunk (starting at 0) but can't use it. 
-             // Allocate again to get a non-zero address.
-             base = __builtin_wasm_memory_grow(0, pages);
-        }
+
+    if (size == 0) {
+      size_t base = __builtin_wasm_memory_size(0);
+      if (base == SIZE_MAX) {
+        return NULL;
+      }
+      return (void*)(base * wasm_page_size);
     }
 
-    if (base == SIZE_MAX) return NULL;
+    size_t pages = (size + wasm_page_size - 1) / wasm_page_size;
+    size_t current = __builtin_wasm_memory_size(0);
+    if (current == SIZE_MAX) {
+      return NULL;
+    }
+
+    // If the heap is empty, reserve one extra page so we can return a non-zero pointer
+    // without doubling the requested allocation.
+    size_t extra = (current == 0 ? 1 : 0);
+    size_t base = __builtin_wasm_memory_grow(0, pages + extra);
+    if (base == SIZE_MAX) {
+      return NULL;
+    }
+
+    if (current == 0) {
+      return (void*)((base + 1) * wasm_page_size);
+    }
     return (void*)(base * wasm_page_size);
   }
 #endif
@@ -85,55 +91,38 @@ static pthread_mutex_t mi_heap_grow_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 static void* mi_prim_mem_grow(size_t size, size_t try_alignment) {
-  void* p = NULL;
-  if (try_alignment <= 1) {
-    // `sbrk` is not thread safe in general so try to protect it (we could skip this on WASM but leave it in for now)
-    #if defined(MI_USE_PTHREADS)
-    pthread_mutex_lock(&mi_heap_grow_mutex);
-    #endif
-    p = mi_memory_grow(size);
-    #if defined(MI_USE_PTHREADS)
-    pthread_mutex_unlock(&mi_heap_grow_mutex);
-    #endif
+  // On WASM, memory.grow always returns 64KiB-aligned addresses.
+  // Since MI_ARENA_SLICE_SIZE is 64KiB (or 32KiB on 32-bit), alignment is naturally satisfied.
+  size_t os_page = _mi_os_page_size();
+  
+  // Clamp alignment to OS page size (64KiB on WASM) - larger alignments would waste memory
+  if (try_alignment > os_page) {
+    try_alignment = os_page;
   }
-  else {
-    void* base = NULL;
-    size_t alloc_size = 0;
-    // to allocate aligned use a lock to try to avoid thread interaction
-    // between getting the current size and actual allocation
-    // (also, `sbrk` is not thread safe in general)
-    #if defined(MI_USE_PTHREADS)
-    pthread_mutex_lock(&mi_heap_grow_mutex);
-    #endif
-    {
-      void* current = mi_memory_grow(0);  // get current size
-      if (current != NULL) {
-        void* aligned_current = _mi_align_up_ptr(current, try_alignment);  // and align from there to minimize wasted space
-        alloc_size = _mi_align_up( ((uint8_t*)aligned_current - (uint8_t*)current) + size, _mi_os_page_size());
-        base = mi_memory_grow(alloc_size);
-      }
-    }
-    #if defined(MI_USE_PTHREADS)
-    pthread_mutex_unlock(&mi_heap_grow_mutex);
-    #endif
-    if (base != NULL) {
-      p = _mi_align_up_ptr(base, try_alignment);
-      if ((uint8_t*)p + size > (uint8_t*)base + alloc_size) {
-        // another thread used wasm_memory_grow/sbrk in-between and we do not have enough
-        // space after alignment. Give up (and waste the space as we cannot shrink :-( )
-        // (in `mi_os_mem_alloc_aligned` this will fall back to overallocation to align)
-        p = NULL;
-      }
-    }
+  
+  // Round up size to page boundary
+  size_t alloc_size = _mi_align_up(size, os_page);
+  if (alloc_size == 0 && size > 0) {
+    alloc_size = os_page;
   }
-  /*
-  if (p == NULL) {
-    _mi_warning_message("unable to allocate sbrk/wasm_memory_grow OS memory (%zu bytes, %zu alignment)\n", size, try_alignment);
+  
+  #if defined(MI_USE_PTHREADS)
+  pthread_mutex_lock(&mi_heap_grow_mutex);
+  #endif
+  
+  void* p = mi_memory_grow(alloc_size);
+  
+  #if defined(MI_USE_PTHREADS)
+  pthread_mutex_unlock(&mi_heap_grow_mutex);
+  #endif
+  
+  // mi_memory_grow returns 64KiB-aligned addresses, which satisfies try_alignment <= 64KiB
+  if (p == NULL && size > 0) {
     errno = ENOMEM;
     return NULL;
   }
-  */
-  mi_assert_internal( p == NULL || try_alignment == 0 || (uintptr_t)p % try_alignment == 0 );
+  
+  mi_assert_internal(p == NULL || try_alignment == 0 || (uintptr_t)p % try_alignment == 0);
   return p;
 }
 
